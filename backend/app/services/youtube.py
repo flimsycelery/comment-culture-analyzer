@@ -1,6 +1,8 @@
 from googleapiclient.discovery import build
 from langdetect import detect, LangDetectException
 from app.config import settings
+from app.services.sarvam import translate_to_english, needs_translation
+import asyncio
 
 def extract_video_id(url: str) -> str:
     if "v=" in url:
@@ -38,7 +40,8 @@ def fetch_comments(video_id: str, max_results: int = 500) -> list[dict]:
                 "text": text,
                 "likes": snippet["likeCount"],
                 "author": snippet["authorDisplayName"],
-                "language": lang
+                "language": lang,
+                "translated": None
             })
 
         page_token = response.get("nextPageToken")
@@ -46,4 +49,21 @@ def fetch_comments(video_id: str, max_results: int = 500) -> list[dict]:
             break
 
     print(f"Fetched {len(comments)} comments")
+    return comments
+
+async def process_comments(video_id: str, max_results: int = 500) -> list[dict]:
+    """Fetch comments and translate regional language ones"""
+    comments = fetch_comments(video_id, max_results)
+    
+    for comment in comments:
+        if needs_translation(comment["language"]):
+            comment["translated"] = await translate_to_english(
+                comment["text"], 
+                comment["language"]
+            )
+        else:
+            comment["translated"] = comment["text"]
+    
+    translated_count = sum(1 for c in comments if c["language"] in ["hi","kn","ta","te","ml","bn","gu","mr"])
+    print(f"Translated {translated_count} regional language comments")
     return comments
