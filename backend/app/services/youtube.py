@@ -1,7 +1,6 @@
 from googleapiclient.discovery import build
-from langdetect import detect, LangDetectException
 from app.config import settings
-from app.services.sarvam import translate_to_english, needs_translation
+from app.services.sarvam import identify_language, translate_to_english, needs_translation
 import asyncio
 
 def extract_video_id(url: str) -> str:
@@ -9,10 +8,13 @@ def extract_video_id(url: str) -> str:
         return url.split("v=")[1].split("&")[0]
     elif "youtu.be/" in url:
         return url.split("youtu.be/")[1].split("?")[0]
+    elif "/live/" in url:
+        return url.split("/live/")[1].split("?")[0]
     else:
         raise ValueError("Invalid YouTube URL")
 
-def fetch_comments(video_id: str, max_results: int = 500) -> list[dict]:
+def fetch_raw_comments(video_id: str, max_results: int = 500) -> list[dict]:
+    """Fetch raw comments from YouTube API"""
     youtube = build("youtube", "v3", developerKey=settings.YOUTUBE_API_KEY)
     
     comments = []
@@ -29,18 +31,11 @@ def fetch_comments(video_id: str, max_results: int = 500) -> list[dict]:
 
         for item in response["items"]:
             snippet = item["snippet"]["topLevelComment"]["snippet"]
-            text = snippet["textDisplay"]
-            
-            try:
-                lang = detect(text)
-            except LangDetectException:
-                lang = "unknown"
-
             comments.append({
-                "text": text,
+                "text": snippet["textDisplay"],
                 "likes": snippet["likeCount"],
                 "author": snippet["authorDisplayName"],
-                "language": lang,
+                "language": None,
                 "translated": None
             })
 
@@ -52,18 +47,24 @@ def fetch_comments(video_id: str, max_results: int = 500) -> list[dict]:
     return comments
 
 async def process_comments(video_id: str, max_results: int = 500) -> list[dict]:
-    """Fetch comments and translate regional language ones"""
-    comments = fetch_comments(video_id, max_results)
-    
+    """Fetch, identify languages, and translate regional comments"""
+    comments = fetch_raw_comments(video_id, max_results)
+
+    print("Identifying languages...")
+    for comment in comments:
+        comment["language"] = await identify_language(comment["text"])
+
+    print("Translating regional comments...")
+    translated_count = 0
     for comment in comments:
         if needs_translation(comment["language"]):
             comment["translated"] = await translate_to_english(
-                comment["text"], 
+                comment["text"],
                 comment["language"]
             )
+            translated_count += 1
         else:
             comment["translated"] = comment["text"]
-    
-    translated_count = sum(1 for c in comments if c["language"] in ["hi","kn","ta","te","ml","bn","gu","mr"])
+
     print(f"Translated {translated_count} regional language comments")
     return comments
