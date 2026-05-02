@@ -44,5 +44,7 @@ async def translate_to_english(text: str, source_lang: str) -> str:
 
 def needs_translation(lang: str) -> bool:
     """Check if comment needs translation - includes Hinglish (hi-Latn)"""
+    if not lang:
+        return False
     base_lang = lang.split("-")[0]
     return base_lang in SUPPORTED_LANGS and lang != "en-Latn"
